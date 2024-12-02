@@ -196,7 +196,7 @@ class GPT(nn.Module):
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         print(fused_available)
-        use_fused = fused_available and device_type == "mps"
+        use_fused = fused_available and device_type == "cpu"
         print(f"using fused AdamW: {use_fused}")
         
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fused)
@@ -208,7 +208,7 @@ class DataLoaderLite:
         self.B=B
         self.T=T
 
-        with open('input.txt','r') as f:
+        with open('E:\ML\Build-NanoGPT\Build-NanoGPT\input.txt','r') as f:
             text=f.read()
         enc=tiktoken.get_encoding('gpt2')
         tokens=enc.encode(text)
@@ -235,10 +235,19 @@ import time
 
 torch.manual_seed(1337)
 torch.mps.manual_seed(1337)
+
+total_batch_size=524288 #2**19, ~0.5M in number of tokens
+B = 2 # micro batch size
+T = 512 # sequence length
+assert total_batch_size % (B*T) ==0, "make sure total_batch_size is divisible by B * T"
+grad_accum_steps=total_batch_size // (B * T)
+print(f"total desired batch size: {total_batch_size}")
+print(f"=> calculated gradient accumalation steps: {grad_accum_steps}")
+
 #get logits
 model=GPT(GPTConfig(vocab_size=50304))
 model.to(device)
-train_loader=DataLoaderLite(B=2,T=512)
+train_loader=DataLoaderLite(B=B,T=T)
 
 max_lr = 6e-4
 min_lr = max_lr * 0.1
@@ -274,7 +283,7 @@ for step in range(max_steps):
     for param_group in optimizer.param_groups:
         param_group['lr']=lr
     optimizer.step()
-    torch.mps.synchronize()
+    #torch.mps.synchronize()
     t1=time.time()
     dt=(t1-t0)*1000
     tokens_processed=train_loader.B * train_loader.T
